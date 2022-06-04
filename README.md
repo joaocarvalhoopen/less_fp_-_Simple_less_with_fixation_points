@@ -20,7 +20,7 @@ Help screen <br>
 Output screen <br>
 
 
-![Output text example](./img/less_fp_help.png) <br>
+![Output text example](./img/less_fp_alice_output.png) <br>
 
 
 ## TODO
