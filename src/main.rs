@@ -7,8 +7,12 @@
 //              Use Esc to quit.
 //              Use 'q' to prev_page.
 //              Use 'a' to next_page.
+//              Use '/' to search for a string.
+//              Use '/' to search + Enter key to exit search mode. 
+//              Use 'p' to prev found string.
+//              Use 'n' to next found string.
 //              Use mouse or keyboard for terminal resize.
-//              I tested it under Linux.
+//              I tested it under Linux, maybe it works under Windows. <br>
 //
 // License: MIT Open Source license.
 //
@@ -40,12 +44,6 @@ use std::time::Duration;
 
 use crate::string_utils::StringUtilsVecCharsV2;
 
-const HELP: &str = r#"
- - Keyboard, mouse and terminal resize events enabled
- - Hit "c" to print current cursor position
- - Use Esc to quit
-"#;
-
 const COLOR_REAL_BLACK: Color = Rgb {r: 0, g: 0, b: 0};
 
 /// This simple program reads a text file, paginate it and shows it with
@@ -54,6 +52,10 @@ const COLOR_REAL_BLACK: Color = Rgb {r: 0, g: 0, b: 0};
 /// Use Esc to quit.
 /// Use 'q' to prev_page.
 /// Use 'a' to next_page.
+/// Use '/' to search for a string.
+/// Use '/' to search + Enter key to exit search mode. 
+/// Use 'p' to prev found string.
+/// Use 'n' to next found string.
 /// Use mouse or keyboard for terminal resize.
 ///
 #[derive(Parser, Debug)]
@@ -64,7 +66,7 @@ struct Args {
     file: Option<PathBuf>,
 
     // TODO:
-    // Read arguments from command line : filename, color, page, Search pattern and next and previous.
+    // Read arguments from command line : color, page, Search pattern and next and previous.
 }
 
 fn main() -> Result<()> {
@@ -100,8 +102,6 @@ fn main() -> Result<()> {
 
 fn start_text_mode(text_vec: &Vec<char>) -> Result<()> {
     println!("Quick reading with fixation points.");
-
-    println!("{}", HELP);
 
     enable_raw_mode()?;
 
@@ -177,9 +177,9 @@ impl Search {
         false
     }
 
-    // TODO: In here I have to calculate the forward distance from the current position
-    //       for all occurrences and get the minimal value.
-    //       If it didn't find, it goes to the first one.
+    // In here I have to calculate the forward distance from the current position
+    // for all occurrences and get the minimal value.
+    // If it didn't find, it goes to the first one.
     fn find_next_nearest_pos(& mut self, text_vec: &Vec<char>, global_curr_page_start_pos: usize) -> usize {
         let mut lowest_distance = text_vec.len() as i32;
         let mut last_word_index = 0_usize;
@@ -239,6 +239,7 @@ fn print_events(text_vec: &Vec<char>, pages_vec: & mut PageVec) -> Result<()> {
     loop {
         // Blocking read
         let event = read()?;
+       
         // println!("Event: {:?}\r", event);
 
         // if event == Event::Key(KeyCode::Char('c').into()) {
@@ -513,8 +514,6 @@ impl PageVec {
         false
     }
 
-    // This is for search.
-
 }
 
 struct Word {
@@ -602,14 +601,7 @@ fn print_fp(p_buf: &Vec<char>, search_opt: &Option<Search>, global_start_pos: us
             }
         } else {
             let (_col, row) = position().unwrap();
-            /* if flag_search_inside_current_word {
-                execute!(stdout(), MoveTo(0, row + 1), SetColors(Colors::new(DarkGrey, White)) ).unwrap();
-            } else if flag_search_inside_word {
-                execute!(stdout(), MoveTo(0, row + 1), SetColors(Colors::new(Blue, White)) ).unwrap();
-            } else {
-                */
-                execute!(stdout(), MoveTo(0, row + 1), SetColors(Colors::new(Green, COLOR_REAL_BLACK)) ).unwrap();
-            /* } */
+            execute!(stdout(), MoveTo(0, row + 1), SetColors(Colors::new(Green, COLOR_REAL_BLACK)) ).unwrap();
         }
     }
 

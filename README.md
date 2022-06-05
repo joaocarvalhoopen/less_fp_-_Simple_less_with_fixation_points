@@ -43,6 +43,35 @@ You can **make a search for a string**, by pressing in '**/**' and  press **Ente
 ![Output result of search example](./img/less_fp_found_strings.png) <br>
 
 
+## To compile and run
+
+```shell
+# Compile for debug
+cargo build  
+
+# or
+
+# Compile for release
+cargo build --release
+
+
+# Run the program 
+cargo run -- --help
+
+# or 
+
+cargo run -- --file alice.txt
+
+# or
+
+./target/debug/less_fp --file alice.txt
+
+# or
+
+./target/release/less_fp --file alice.txt
+```
+
+
 ## Dependencies
 ```
 clap = "3.1.18"
