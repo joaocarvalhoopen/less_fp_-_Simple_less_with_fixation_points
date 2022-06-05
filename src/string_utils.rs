@@ -136,6 +136,9 @@ pub trait StringUtilsVecCharsV2 {
     fn ends_with_vec(& self, pattern_vec_chars: &[char]) -> bool;
     fn ends_with_str(& self, pattern_str: &str) -> bool;
 
+    fn find_vec_all(& self, pattern_vec_chars: &Vec<char>) -> Vec<usize>;
+    fn find_str_all(& self, pattern_str: &str) -> Vec<usize>;
+
     /// Returns a None or the index of the first replace.
     fn replace_vec(& mut self, match_pattern_vec: &Vec<char>, replace_pattern_vec: &Vec<char>, start_pos: usize, end_pos: Option<usize>) -> Option<usize>;
     /// Returns a None or the index of the first replace.
@@ -393,7 +396,32 @@ impl StringUtilsVecCharsV2 for Vec<char> {
         self.ends_with_vec(&pattern_vec_chars)
     }
 
+    /// Returns a Vec<usize> with all the finds.
+    fn find_vec_all(&self, pattern_vec_chars: &Vec<char>) -> Vec<usize> {
+        let mut flag_ended_find = false;
+        let mut next_start_pos = 0_usize;
+        let mut indexes_vec: Vec<usize> = Vec::new(); 
+        // Find, from start to end, the indexes of the machs. Put's them on a Vec.
+        while !flag_ended_find {
+            if next_start_pos >= self.len() {
+                // flag_ended_find = true;
+                break;
+            }
+            let res = self.find_vec(pattern_vec_chars, next_start_pos, None);
+            if let Some(index) = res {
+                indexes_vec.push(index);
+                next_start_pos = index + pattern_vec_chars.len();                
+            } else {
+                flag_ended_find = true;
+            }
+        }
+        indexes_vec
+    }
 
+    fn find_str_all(&self, pattern_str: &str) -> Vec<usize> {
+        let pattern_vec_chars: Vec<char> = pattern_str.get_vec_chars(); 
+        self.find_vec_all(&pattern_vec_chars)
+    }
 
     /// Returns a None or the index of the first replace.
     fn replace_vec(& mut self, match_pattern_vec: &Vec<char>, replace_pattern_vec: &Vec<char>, start_pos: usize, end_pos: Option<usize>) -> Option<usize> {
@@ -467,8 +495,6 @@ impl StringUtilsVecCharsV2 for Vec<char> {
         self.replace_vec_all(&match_pattern_str.get_vec_chars(),
                            &replace_pattern_str.get_vec_chars())
     }
-
-
 
     fn split_vec(& self, at_pattern_vec: &Vec<char>) -> Vec<&[char]> {
         let match_pattern_vec = at_pattern_vec;

@@ -117,7 +117,10 @@ fn start_text_mode(text_vec: &Vec<char>) -> Result<()> {
     let mut pages_vec = PageVec::paginate(text_vec, terminal::size());
     let (_page_num, page) = pages_vec.get_curr_page();
     let text_vec_page = text_vec[page.global_start_char_pos..=page.global_stop_char_pos].to_vec();
-    print_fp(&text_vec_page /* , Green */ );
+    let search_opt: Option<Search> = None;
+    let search_string = "";
+    print_fp(&text_vec_page, &search_opt, page.global_start_char_pos,
+        &SearchMode::NotInMode, search_string);
 
     if let Err(e) = print_events(text_vec, & mut pages_vec) {
         println!("Error: {:?}\r", e);
@@ -129,15 +132,122 @@ fn start_text_mode(text_vec: &Vec<char>) -> Result<()> {
 
 }
 
+struct TextPos {
+    start_pos: usize,
+    end_pos: usize,
+}
+
+struct Search {
+    curr_pos: usize,
+    text_pos_vec: Vec<TextPos>,
+}
+
+impl Search {
+    fn find(global_text: &Vec<char>, search_string: &str) -> Option<Self> {
+        let ocurrencies = global_text.find_str_all(search_string);
+        if ocurrencies.is_empty() {
+            return None;
+        }
+        let mut text_pos_vec: Vec<TextPos> = Vec::new();
+        for start_pos in ocurrencies {
+            text_pos_vec.push(
+                TextPos { start_pos, end_pos: start_pos + search_string.len() - 1});
+        }
+        Some(
+            Search {
+                curr_pos: 0,
+                text_pos_vec
+                }
+            )
+    }
+
+    fn get_curr_pos(&self) -> (usize, &TextPos) {
+        (self.curr_pos, &self.text_pos_vec[self.curr_pos])
+    }
+
+    fn next_pos(& mut self) -> bool {
+        if self.curr_pos < self.text_pos_vec.len() - 1 {
+            self.curr_pos += 1;
+            return true;
+        }
+        false
+    }
+
+    fn prev_pos(& mut self) -> bool {
+        if self.curr_pos > 0 {
+            self.curr_pos -= 1;
+            return true;
+        }
+        false
+    }
+
+    // TODO: In here I have to calculate the forward distance from the current position
+    //       for all occurrences and get the minimal value.
+    //       If it didn't find, it goes to the first one.
+    fn find_next_nearest_pos(& mut self, text_vec: &Vec<char>, global_curr_page_start_pos: usize) -> usize {
+        let mut lowest_distance = text_vec.len() as i32;
+        let mut last_word_index = 0_usize;
+
+        // Search's next in front of current start of current page start position, in reverse, from the end to the current position.
+        for (word_index, text_pos) in self.text_pos_vec.iter().rev().enumerate() {
+           let delta = text_pos.start_pos as i32 - global_curr_page_start_pos as i32;
+           if delta >= 0 && delta < lowest_distance {
+               lowest_distance = delta;
+               last_word_index = self.text_pos_vec.len() - 1 - word_index;
+           }
+        }
+
+        if lowest_distance < text_vec.len() as i32 {
+            // Found word occurrence position in front of the start of current page.
+            self.curr_pos = last_word_index;
+            self.text_pos_vec[last_word_index].start_pos
+        } else {
+            // Returns the global position of first occurrence in the text file.
+            self.curr_pos = 0;
+            self.text_pos_vec[0].start_pos
+        }           
+    }
+
+    fn is_inside_word(& self, global_pos_of_char: usize) -> bool {
+        for text_pos in self.text_pos_vec.iter() {
+            if    global_pos_of_char >= text_pos.start_pos
+               && global_pos_of_char <= text_pos.end_pos {
+                   return true;
+               }
+        }
+        false
+    }
+
+    fn is_inside_current_word(& self, global_pos_of_char: usize) -> bool {
+        if    global_pos_of_char >= self.text_pos_vec[self.curr_pos].start_pos
+            && global_pos_of_char <= self.text_pos_vec[self.curr_pos].end_pos {
+                return true;
+            }
+        false
+    }
+
+}
+
+enum SearchMode {
+    NotInMode,
+    EnteringSearchString,
+    BrowsingInSearch,
+}
+
 fn print_events(text_vec: &Vec<char>, pages_vec: & mut PageVec) -> Result<()> {
+    
+    let mut search_mode = SearchMode::NotInMode;
+    let mut search_string = String::new();
+    let mut search_opt: Option<Search> = None;
+
     loop {
         // Blocking read
         let event = read()?;
         // println!("Event: {:?}\r", event);
 
-        if event == Event::Key(KeyCode::Char('c').into()) {
-            println!("Cursor position: {:?}\r", position());
-        }
+        // if event == Event::Key(KeyCode::Char('c').into()) {
+        //     println!("Cursor position: {:?}\r", position());
+        // }
 
         if let Event::Resize(_, _) = event {
             let (original_size, new_size) = flush_resize_events(event);
@@ -159,7 +269,9 @@ fn print_events(text_vec: &Vec<char>, pages_vec: & mut PageVec) -> Result<()> {
 
             let (_page_num, page) = pages_vec.get_curr_page();        
             let text_vec_page = text_vec[page.global_start_char_pos..=page.global_stop_char_pos].to_vec();
-            print_fp(&text_vec_page);
+            
+            print_fp(&text_vec_page, &search_opt, page.global_start_char_pos,
+                     &search_mode, &search_string);
         }
 
         if event == Event::Key(KeyCode::Esc.into()) {
@@ -167,17 +279,105 @@ fn print_events(text_vec: &Vec<char>, pages_vec: & mut PageVec) -> Result<()> {
             break;
         }
 
-        if event == Event::Key(KeyCode::Char('q').into()) && pages_vec.prev_page(){
-            let (_page_num, page) = pages_vec.get_curr_page();        
-            let text_vec_page = text_vec[page.global_start_char_pos..=page.global_stop_char_pos].to_vec();
-            print_fp(&text_vec_page);
+        match search_mode {
+            SearchMode::NotInMode | SearchMode::BrowsingInSearch  => {
+                    if event == Event::Key(KeyCode::Char('q').into()) && pages_vec.prev_page(){
+                        let (_page_num, page) = pages_vec.get_curr_page();        
+                        let text_vec_page = text_vec[page.global_start_char_pos..=page.global_stop_char_pos].to_vec();
+                        print_fp(&text_vec_page, &search_opt, page.global_start_char_pos,
+                                 &search_mode, &search_string);
+                    }
+        
+                    if event == Event::Key(KeyCode::Char('a').into()) && pages_vec.next_page(){
+                        let (_page_num, page) = pages_vec.get_curr_page();        
+                        let text_vec_page = text_vec[page.global_start_char_pos..=page.global_stop_char_pos].to_vec();
+                        print_fp(&text_vec_page, &search_opt, page.global_start_char_pos,
+                                 &search_mode, &search_string);
+                    }
+
+                    // Enter in search mode.
+                    if event == Event::Key(KeyCode::Char('/').into()){
+                        search_string.clear();
+                        search_mode = SearchMode::EnteringSearchString;
+                        let (_page_num, page) = pages_vec.get_curr_page();        
+                        let text_vec_page = text_vec[page.global_start_char_pos..=page.global_stop_char_pos].to_vec();
+                        print_fp(&text_vec_page, &search_opt, page.global_start_char_pos,
+                                 &search_mode, &search_string);
+                    }
+
+                    if let SearchMode::BrowsingInSearch = search_mode {
+                        if let Some(ref mut search_tmp) = search_opt {
+                            
+                            // We jump to the prev or next word find occurrence.
+                            if   (event == Event::Key(KeyCode::Char('p').into()) && search_tmp.prev_pos())
+                              || (event == Event::Key(KeyCode::Char('n').into()) && search_tmp.next_pos()) {
+                                
+                                // The prev_pos() or the next_pos() as already been made, so we do a get current position.
+                                let (_ocurr_index, TextPos { start_pos, end_pos: _ }) = search_tmp.get_curr_pos();                                                                   
+                                let page_num =  pages_vec.find_char_pos_in_pages(*start_pos);
+                                pages_vec.set_curr_page_num(page_num);
+
+                                let (_page_num, page) = pages_vec.get_curr_page();                                    
+                                let text_vec_page = text_vec[page.global_start_char_pos..=page.global_stop_char_pos].to_vec();
+                                print_fp(&text_vec_page, &search_opt, page.global_start_char_pos,
+                                        &search_mode, &search_string);
+
+                            }
+                        }
+                    }
+                },
+            SearchMode::EnteringSearchString => {
+                    // Exit search mode.
+                    match event{
+                        Event::Key(key_event) => {
+                                if key_event.code == KeyCode::Enter {
+                                    if !search_string.is_empty() {
+                                        // Do the search in the text.
+                                        
+                                        // TODO: Possible error not found by the compiler, if we make the next line
+                                        // "if let Some(ref search_tmp)"
+                                        // and comment the line a few lines below "search_opt = Some(search_tmp);" 
+                                        if let Some(mut search_tmp) = Search::find(text_vec, &search_string) {
+                                            search_mode = SearchMode::BrowsingInSearch;
+                                            // Go to the page and update the screen.
+                                            let (_page_num, page) = pages_vec.get_curr_page();
+                                            let search_next_pos = search_tmp.find_next_nearest_pos( &text_vec, page.global_start_char_pos);
+                                            let page_num = pages_vec.find_char_pos_in_pages(search_next_pos);
+                                            search_opt = Some(search_tmp);
+                                            pages_vec.set_curr_page_num(page_num);
+                                            let (_page_num, page) = pages_vec.get_curr_page();
+                                            let text_vec_page = text_vec[page.global_start_char_pos..=page.global_stop_char_pos].to_vec();
+                                            print_fp(&text_vec_page, &search_opt, page.global_start_char_pos,
+                                                     &search_mode, &search_string);
+                                            continue;
+                                        } else {
+                                            search_opt = None;
+                                            search_mode = SearchMode::NotInMode;   
+                                        }
+                                    } else {
+                                        search_opt = None;
+                                        search_mode = SearchMode::NotInMode;
+                                    }
+                                } else if key_event.code == KeyCode::Backspace {
+                                    search_string.pop();                                 
+                                } else if let KeyCode::Char(c) = key_event.code {
+                                    search_string.push(c);
+                                }
+                                let (_page_num, page) = pages_vec.get_curr_page();        
+                                let text_vec_page = text_vec[page.global_start_char_pos..=page.global_stop_char_pos].to_vec();
+                                print_fp(&text_vec_page, &search_opt, page.global_start_char_pos,
+                                         &search_mode, &search_string);
+                            },
+                        // Events processed before this point.
+                        Event::Mouse(_) => (),
+                        Event::Resize(_, _) => (),
+                    };
+                    
+                    
+                },
+            
         }
 
-        if event == Event::Key(KeyCode::Char('a').into()) && pages_vec.next_page() {
-            let (_page_num, page) = pages_vec.get_curr_page();        
-            let text_vec_page = text_vec[page.global_start_char_pos..=page.global_stop_char_pos].to_vec();
-            print_fp(&text_vec_page);
-        }
     }
 
     Ok(())
@@ -330,7 +530,6 @@ struct Word {
 
 trait Inside {
     fn is_inside_word_first_half(&self, index: usize) -> bool;
-
 }
 
 impl Inside for Vec<Word> {
@@ -346,7 +545,8 @@ impl Inside for Vec<Word> {
     }    
 }
 
-fn print_fp(p_buf: &Vec<char>) {
+fn print_fp(p_buf: &Vec<char>, search_opt: &Option<Search>, global_start_pos: usize,
+            search_mode: &SearchMode, search_string: &str) {
     // Find the start and end indices of the words in the String and corrects for a sequence of white spaces or tabs.
     let mut words_index: Vec<Word> = Vec::new();
     let mut flag_inside_word = false;
@@ -377,17 +577,55 @@ fn print_fp(p_buf: &Vec<char>) {
 
     // Prints in bold and normal, the text on the terminal.
     for (i, c) in p_buf.iter().enumerate() {
+        let mut flag_search_inside_word = false;
+        let mut flag_search_inside_current_word = false;
+        if let Some(ref search_tmp ) = search_opt {
+            flag_search_inside_word = search_tmp.is_inside_word(global_start_pos + i); 
+            flag_search_inside_current_word = search_tmp.is_inside_current_word(global_start_pos + i); 
+        }
+
         if *c == '\n' {
             let (_col, row) = position().unwrap();
             execute!(stdout(), MoveTo(0, row + 1), SetColors(Colors::new(Green, COLOR_REAL_BLACK)) ).unwrap();
         } else if words_index.is_inside_word_first_half(i) {
-            execute!(stdout(), SetColors(Colors::new(Green, COLOR_REAL_BLACK)), Print(&(*c.to_string()).bold()) ).unwrap();
+            if flag_search_inside_current_word {
+                execute!(stdout(), SetColors(Colors::new(DarkGrey, White)), Print(&(*c.to_string()).bold()) ).unwrap();
+            } else if flag_search_inside_word {
+                execute!(stdout(), SetColors(Colors::new(Blue, White)), Print(&(*c.to_string())) ).unwrap();
+            } else {
+                execute!(stdout(), SetColors(Colors::new(Green, COLOR_REAL_BLACK)), Print(&(*c.to_string()).bold()) ).unwrap();
+            }
         } else if *c != '\n' {
-            execute!(stdout(), SetColors(Colors::new(Green, COLOR_REAL_BLACK)), Print( &(*c.to_string())) ).unwrap();
+
+            if flag_search_inside_current_word {
+                execute!(stdout(), SetColors(Colors::new(DarkGrey, White)), Print(&(*c.to_string()).bold()) ).unwrap();
+            } else if flag_search_inside_word {
+                execute!(stdout(), SetColors(Colors::new(Blue, White)), Print( &(*c.to_string())) ).unwrap();
+            } else {
+                execute!(stdout(), SetColors(Colors::new(Green, COLOR_REAL_BLACK)), Print( &(*c.to_string())) ).unwrap();
+            }
         } else {
             let (_col, row) = position().unwrap();
-            execute!(stdout(), MoveTo(0, row + 1), SetColors(Colors::new(Green, COLOR_REAL_BLACK)) ).unwrap();
+            /* if flag_search_inside_current_word {
+                execute!(stdout(), MoveTo(0, row + 1), SetColors(Colors::new(DarkGrey, White)) ).unwrap();
+            } else if flag_search_inside_word {
+                execute!(stdout(), MoveTo(0, row + 1), SetColors(Colors::new(Blue, White)) ).unwrap();
+            } else {
+                */
+                execute!(stdout(), MoveTo(0, row + 1), SetColors(Colors::new(Green, COLOR_REAL_BLACK)) ).unwrap();
+            /* } */
         }
+    }
+
+    match search_mode {
+        SearchMode::NotInMode => (),
+        SearchMode::EnteringSearchString => {
+            let (_len_col, len_row) = terminal::size().unwrap();
+            let string_out = "/ ".to_string() + search_string;
+            execute!(stdout(), MoveTo(0, len_row - 1), SetColors(Colors::new(White, DarkBlue)), Print( &(string_out)) ).unwrap();
+            execute!(stdout(), SetColors(Colors::new(Green, COLOR_REAL_BLACK)) ).unwrap();
+            },
+        SearchMode::BrowsingInSearch => (),
     }
 
 }
