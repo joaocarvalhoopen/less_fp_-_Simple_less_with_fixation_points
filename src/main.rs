@@ -14,11 +14,7 @@
 //
 // Have fun!
 //
-// TODO: 
-//    -Implement simple Search keys / + text_to_search + enter, with next and previous key bindings,
-//    the found words will be negative highlighted. The pages will automatically jump
-//    to the next or the previous page to go to the nearest word.
-//
+
 use clap::Parser;
 use std::path::PathBuf;
 use std::fs;
